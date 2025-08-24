@@ -1,0 +1,114 @@
+<?php
+// Use Composer's autoloader to include PHPMailer
+require_once 'vendor/autoload.php';
+
+// Import PHPMailer classes into the global namespace
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
+use PHPMailer\PHPMailer\Exception;
+
+// Include your database configuration
+require_once 'config.php';
+
+$message = "";
+$success = false;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $email = $_POST['email'] ?? '';
+    
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $message = "Please enter a valid email address.";
+    } else {
+        // Check if user exists
+        $stmt = $conn->prepare("SELECT prn FROM users WHERE email = ?");
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        if ($result->num_rows > 0) {
+            // User exists, generate a token
+            $token = bin2hex(random_bytes(32));
+            $token_hash = hash('sha256', $token);
+            $expires_at = time() + 3600; // Token expires in 1 hour
+
+            // Store the token in the database
+            $stmt = $conn->prepare("INSERT INTO password_resets (email, token_hash, expires_at) VALUES (?, ?, ?)");
+            $stmt->bind_param("ssi", $email, $token_hash, $expires_at);
+            $stmt->execute();
+
+            // Send the email
+            $mail = new PHPMailer(true);
+            try {
+                // Server settings
+                $mail->isSMTP();
+                $mail->Host       = 'smtp.gmail.com';
+                $mail->SMTPAuth   = true;
+                $mail->Username   = 'aabbuse2@gmail.com'; // <-- REPLACE WITH YOUR GMAIL
+                $mail->Password   = 'bjws vwnw ptpm agir'; // <-- REPLACE WITH YOUR APP PASSWORD
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+                $mail->Port       = 465;
+
+                // Recipients
+                $mail->setFrom('your_gmail_email@gmail.com', 'Attendance System');
+                $mail->addAddress($email);
+
+                // Content
+                $reset_link = "http://localhost/am/reset-password.php?token=" . $token; // Make sure 'am' is your project folder name
+                $mail->isHTML(true);
+                $mail->Subject = 'Password Reset Request';
+                $mail->Body    = "Hi,<br><br>Click the link below to reset your password:<br><a href='$reset_link'>$reset_link</a><br><br>This link will expire in one hour.";
+
+                $mail->send();
+                $success = true;
+            } catch (Exception $e) {
+                $message = "Message could not be sent. Mailer Error: {$mail->ErrorInfo}";
+            }
+        }
+        // Always show a success message to prevent user enumeration attacks
+        $message = "If an account with that email exists, a password reset link has been sent.";
+        $success = true; // Set to true to show the green success box
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Forgot Password</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Poppins', sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { width: 100%; max-width: 450px; background: #fff; padding: 40px; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+        h2 { text-align: center; margin-bottom: 10px; }
+        p { text-align: center; color: #666; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; }
+        input { width: 100%; padding: 12px 15px; border: 1px solid #ddd; border-radius: 8px; }
+        .submit-btn { width: 100%; padding: 15px; border: none; border-radius: 8px; background-color: #4a69bd; color: #fff; font-size: 16px; cursor: pointer; }
+        .alert { padding: 12px; margin-bottom: 20px; border-radius: 8px; text-align: center; }
+        .alert-success { background-color: #d4edda; color: #155724; }
+        .alert-error { background-color: #f8d7da; color: #721c24; }
+        .login-link { text-align: center; margin-top: 20px; }
+        .login-link a { color: #4a69bd; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Forgot Your Password?</h2>
+        <p>Enter your email address and we will send you a link to reset your password.</p>
+        <?php if (!empty($message)): ?>
+            <div class="alert <?php echo $success ? 'alert-success' : 'alert-error'; ?>">
+                <?php echo htmlspecialchars($message); ?>
+            </div>
+        <?php endif; ?>
+        <form action="forgot-password.php" method="post" novalidate>
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <button type="submit" class="submit-btn">Send Reset Link</button>
+        </form>
+        <p class="login-link"><a href="login.php">Back to Login</a></p>
+    </div>
+</body>
+</html>
